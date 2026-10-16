@@ -842,7 +842,7 @@
 <div class="app-container">
     <h1>LED Remoto</h1>
     <div class="sub">Maestro-Esclavo en tiempo real</div>
-    <div class="version-chip" id="versionChip" title="Version del software">
+    <div class="version-chip hidden" id="versionChip" title="Version del software">
         <span class="version-dot"></span>
         <span id="versionChipText">v...</span>
     </div>
@@ -967,66 +967,105 @@
 
 
     // =============================================================
-    //  1B. VERSION CHIP: pedir la version al Service Worker
+    //  1B. VERSION CHIP: version del Service Worker (con fallback)
     // =============================================================
     var versionChip = document.getElementById('versionChip');
     var versionChipText = document.getElementById('versionChipText');
-    var _versionRetries = 0;
+    var versionSet = false;
+    var controllerTries = 0;
 
     function extractVersionLabel(raw) {
         var s = String(raw || '').trim();
         if (!s) return null;
-        var m = s.match(/v\d+(?:[.\-_][\w]+)*/i);
+        var m = s.match(/v\d+(?:[.\-_][\w]+)*/i);   // 'led-remoto-v2.6' -> 'v2.6'
         if (m) return m[0].toLowerCase();
-        m = s.match(/\d+(?:\.\d+)+/);
+        m = s.match(/\d+(?:\.\d+)+/);               // 'app-1.4.2' -> 'v1.4.2'
         if (m) return 'v' + m[0];
         return s.toLowerCase();
     }
 
     function setVersionChip(rawVersion) {
+        if (versionSet) return;
         var label = extractVersionLabel(rawVersion);
         if (!versionChip || !versionChipText || !label) return;
+        versionSet = true;
         versionChipText.textContent = label;
         versionChip.title = 'Version del software: ' + rawVersion;
+        versionChip.classList.remove('hidden');
         versionChip.classList.add('loaded');
-        log('[Version] Chip actualizado: ' + label + ' (SW: ' + rawVersion + ')');
+        log('[Version] Chip: ' + label + ' (fuente: ' + rawVersion + ')');
     }
 
     function hideVersionChip() {
         if (versionChip) versionChip.classList.add('hidden');
     }
 
+    // PLAN B: leer CACHE_NAME directamente del sw.js servido por red
+    function fallbackFetchVersion() {
+        if (versionSet) return;
+        fetch('./sw.js', { cache: 'reload' })
+            .then(function(r) {
+                return r.ok ? r.text() : Promise.reject(new Error('HTTP ' + r.status));
+            })
+            .then(function(txt) {
+                var m = txt.match(/CACHE_NAME\s*=\s*['"]([^'"]+)['"]/);
+                if (m) {
+                    setVersionChip(m[1]);
+                } else {
+                    log('[Version] CACHE_NAME no encontrado en sw.js');
+                    hideVersionChip();
+                }
+            })
+            .catch(function(e) {
+                log('[Version] Fallback sw.js fallo: ' + e.message);
+                hideVersionChip();
+            });
+    }
+
+    // PLAN A: preguntar al SW activo via MessageChannel
+    function askController() {
+        try {
+            var answered = false;
+            var channel = new MessageChannel();
+            channel.port1.onmessage = function(event) {
+                answered = true;
+                if (event.data && event.data.version) {
+                    setVersionChip(event.data.version);
+                } else {
+                    fallbackFetchVersion();
+                }
+            };
+            navigator.serviceWorker.controller.postMessage(
+                { type: 'GET_VERSION' },
+                [channel.port2]
+            );
+            // Si el SW no responde (handler antiguo), usar el fallback
+            setTimeout(function() {
+                if (!answered && !versionSet) {
+                    log('[Version] SW sin respuesta a GET_VERSION, usando fallback');
+                    fallbackFetchVersion();
+                }
+            }, 2500);
+        } catch (e) {
+            log('[Version] postMessage fallo: ' + e.message);
+            fallbackFetchVersion();
+        }
+    }
+
     function requestSwVersion() {
-        if (!versionChip) return;
-        if (!('serviceWorker' in navigator)) { hideVersionChip(); return; }
+        if (versionSet || !versionChip) return;
+        if (!('serviceWorker' in navigator)) { fallbackFetchVersion(); return; }
 
         if (navigator.serviceWorker.controller) {
-            try {
-                var channel = new MessageChannel();
-                channel.port1.onmessage = function(event) {
-                    if (event.data && event.data.version) {
-                        setVersionChip(event.data.version);
-                    } else {
-                        hideVersionChip();
-                    }
-                };
-                navigator.serviceWorker.controller.postMessage(
-                    { type: 'GET_VERSION' },
-                    [channel.port2]
-                );
-            } catch (e) {
-                log('[Version] Error pidiendo version al SW: ' + e.message);
-                hideVersionChip();
-            }
+            askController();
             return;
         }
-
-        // Sin controlador aun (primer arranque): reintentar unos segundos
-        if (_versionRetries < 8) {
-            _versionRetries++;
-            setTimeout(requestSwVersion, 1200);
+        // Sin controlador (primer arranque): reintentos cortos y fallback
+        if (controllerTries < 3) {
+            controllerTries++;
+            setTimeout(requestSwVersion, 900);
         } else {
-            hideVersionChip();
+            fallbackFetchVersion();
         }
     }
 
