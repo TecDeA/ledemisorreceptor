@@ -114,26 +114,9 @@
         .sub {
             text-align: center;
             color: #7a9bb0;
-            margin-bottom: 10px;
+            margin-bottom: 24px;
             font-size: 0.78rem;
         }
-        .version-chip {
-            display: none;
-            width: fit-content;
-            margin: 0 auto 22px;
-            padding: 3px 12px;
-            border-radius: 999px;
-            background: rgba(125, 211, 252, 0.08);
-            border: 1px solid rgba(125, 211, 252, 0.25);
-            color: #7dd3fc;
-            font-size: 0.68rem;
-            font-weight: 700;
-            letter-spacing: 0.04em;
-            font-family: ui-monospace, 'SF Mono', 'Cascadia Mono', Consolas, monospace;
-            cursor: default;
-            user-select: none;
-        }
-        .version-chip.visible { display: block; }
 
         /* ========================================================= */
         /*  INSTALL BANNER                                             */
@@ -745,8 +728,7 @@
             .led-body { transform: scale(0.6); transform-origin: top center; }
             .emitter-button { width: 90px; height: 90px; margin: 6px auto; }
             h1 { font-size: 1.1rem; margin-bottom: 2px; }
-            .sub { margin-bottom: 4px; font-size: 0.7rem; }
-            .version-chip { margin-bottom: 8px; font-size: 0.6rem; padding: 2px 10px; }
+            .sub { margin-bottom: 8px; font-size: 0.7rem; }
             footer { margin-top: 6px; display: none; }
             .btn-group { margin-top: 6px; }
             .status-msg { margin-top: 8px; min-height: 24px; font-size: 0.62rem; }
@@ -819,7 +801,6 @@
 <div class="app-container">
     <h1>LED Remoto</h1>
     <div class="sub">Maestro-Esclavo en tiempo real</div>
-    <div class="version-chip" id="versionChip" title="Version activa del software">v...</div>
 
     <div class="settings-panel">
         <div class="room-control">
@@ -858,9 +839,6 @@
     Sin conexion a internet. La app funciona con datos cacheados, pero el control en tiempo real requiere conexion.
 </div>
 
-<!-- Config de Firebase (cargada antes del script principal) -->
-<script src="./firebase-config.js"></script>
-
 <script>
 (function() {
     "use strict";
@@ -884,73 +862,11 @@
         }
     }
 
-    // =============================================================
-    //  1b. VERSION CHIP — version dinamica desde el Service Worker
-    // =============================================================
-    function setChipVersion(raw) {
-        var chip = document.getElementById('versionChip');
-        if (!chip) return;
-        // Extraer "2.7" de un nombre de cache tipo "led-remoto-v2.7"
-        var match = /(\d+(?:\.\d+)+)/.exec(String(raw || ''));
-        var version = match ? match[1] : String(raw || '');
-        if (!version) return;
-        chip.textContent = 'v' + version;
-        chip.title = 'Version activa del software: ' + version;
-        chip.classList.add('visible');
-        log('[PWA] Version mostrada en chip: v' + version);
-    }
-
-    function chipVersionFromSwFile() {
-        // Respaldo: leer sw.js y extraer CACHE_NAME directamente
-        fetch('./sw.js', { cache: 'no-cache' })
-            .then(function(res) { return res.text(); })
-            .then(function(text) {
-                var m = /CACHE_NAME\s*=\s*['"]([^'"]+)['"]/.exec(text);
-                if (m) setChipVersion(m[1]);
-            })
-            .catch(function() { /* sin version disponible */ });
-    }
-
-    function askSwVersion(worker) {
-        var settled = false;
-        var channel = new MessageChannel();
-        // Si el SW no contesta a tiempo, recurrir al respaldo
-        var fallbackTimer = setTimeout(function() {
-            if (settled) return;
-            settled = true;
-            chipVersionFromSwFile();
-        }, 1500);
-        channel.port1.onmessage = function(event) {
-            if (settled) return;
-            settled = true;
-            clearTimeout(fallbackTimer);
-            if (event.data && event.data.version) setChipVersion(event.data.version);
-        };
-        worker.postMessage({ type: 'GET_VERSION' }, [channel.port2]);
-    }
-
-    function updateVersionChip() {
-        var chip = document.getElementById('versionChip');
-        if (!chip) return;
-        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-            askSwVersion(navigator.serviceWorker.controller);
-        } else {
-            chipVersionFromSwFile();
-        }
-    }
-
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', function() {
-            updateVersionChip();
-
             navigator.serviceWorker.register('./sw.js', { scope: './' })
                 .then(function(reg) {
                     console.log('[PWA] Service Worker registrado, scope:', reg.scope);
-
-                    // Si aun no controla la pagina pero ya hay un SW activo, preguntarle directamente
-                    if (reg.active && !navigator.serviceWorker.controller) {
-                        askSwVersion(reg.active);
-                    }
 
                     // Detectar cuando un nuevo SW se instala y queda en espera
                     reg.addEventListener('updatefound', function() {
@@ -1086,17 +1002,17 @@
     // =============================================================
     //  5. FIREBASE
     // =============================================================
-    // -------------------------------------------------------------
-    //  Config de Firebase externalizada en ./firebase-config.js
-    //  (se carga con <script> antes que este bloque)
-    // -------------------------------------------------------------
-    var firebaseConfig = window.LED_FIREBASE_CONFIG || null;
+    var firebaseConfig = {
+        apiKey: "AIzaSyBfjYWT2Ex9V4x6ec9Ko1VyJxK_sdhsDpA",
+        authDomain: "ledemisorreceptor.firebaseapp.com",
+        databaseURL: "https://ledemisorreceptor-default-rtdb.europe-west1.firebasedatabase.app",
+        projectId: "ledemisorreceptor",
+        storageBucket: "ledemisorreceptor.firebasestorage.app",
+        messagingSenderId: "20805551895",
+        appId: "1:20805551895:web:062fe6803a060b8aee9952"
+    };
 
     var db = null;
-    if (!firebaseConfig) {
-        showError("Configura Firebase: pega tu objeto firebaseConfig en firebase-config.js");
-        return;
-    }
     try {
         firebase.initializeApp(firebaseConfig);
         db = firebase.database();
