@@ -119,6 +119,44 @@
         }
 
         /* ========================================================= */
+        /*  VERSION CHIP (dinamico, desde el Service Worker)           */
+        /* ========================================================= */
+        .version-chip {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            width: fit-content;
+            margin: -16px auto 24px;
+            background: rgba(15, 23, 31, 0.85);
+            border: 1px solid rgba(125, 211, 252, 0.15);
+            border-radius: 20px;
+            padding: 4px 14px;
+            font-size: 0.6rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            color: #7a9bb0;
+            cursor: default;
+            transition: color 0.3s ease, border-color 0.3s ease;
+        }
+        .version-chip.loaded {
+            color: #7dd3fc;
+            border-color: rgba(125, 211, 252, 0.35);
+        }
+        .version-chip .version-dot {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: #5a7a8e;
+            transition: background 0.3s ease, box-shadow 0.3s ease;
+        }
+        .version-chip.loaded .version-dot {
+            background: #4ade80;
+            box-shadow: 0 0 6px rgba(74, 222, 128, 0.7);
+        }
+        .version-chip.hidden { display: none; }
+
+        /* ========================================================= */
         /*  INSTALL BANNER                                             */
         /* ========================================================= */
         .install-banner {
@@ -694,6 +732,7 @@
             .led-legend { font-size: 0.52rem; }
             .led-lead-label { font-size: 0.52rem; }
             .state-indicator { font-size: 0.9rem; }
+            .version-chip { padding: 3px 10px; font-size: 0.55rem; margin: -14px auto 20px; }
         }
         /* Standard phones */
         @media (min-width: 341px) and (max-width: 420px) {
@@ -729,6 +768,7 @@
             .emitter-button { width: 90px; height: 90px; margin: 6px auto; }
             h1 { font-size: 1.1rem; margin-bottom: 2px; }
             .sub { margin-bottom: 8px; font-size: 0.7rem; }
+            .version-chip { margin: -12px auto 10px; padding: 3px 10px; }
             footer { margin-top: 6px; display: none; }
             .btn-group { margin-top: 6px; }
             .status-msg { margin-top: 8px; min-height: 24px; font-size: 0.62rem; }
@@ -745,6 +785,7 @@
             .emitter-button { width: 70px; height: 70px; }
             .state-indicator { margin-top: 4px; font-size: 0.85rem; padding: 4px 10px; }
             .main-area { min-height: auto; padding: 4px; }
+            .version-chip { display: none; }
         }
         /* High-DPI / Retina sharpening */
         @media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
@@ -801,6 +842,10 @@
 <div class="app-container">
     <h1>LED Remoto</h1>
     <div class="sub">Maestro-Esclavo en tiempo real</div>
+    <div class="version-chip" id="versionChip" title="Version del software">
+        <span class="version-dot"></span>
+        <span id="versionChipText">v...</span>
+    </div>
 
     <div class="settings-panel">
         <div class="room-control">
@@ -920,6 +965,76 @@
         document.getElementById('updateBanner').classList.add('hidden');
     });
 
+
+    // =============================================================
+    //  1B. VERSION CHIP: pedir la version al Service Worker
+    // =============================================================
+    var versionChip = document.getElementById('versionChip');
+    var versionChipText = document.getElementById('versionChipText');
+    var _versionRetries = 0;
+
+    function extractVersionLabel(raw) {
+        var s = String(raw || '').trim();
+        if (!s) return null;
+        var m = s.match(/v\d+(?:[.\-_][\w]+)*/i);
+        if (m) return m[0].toLowerCase();
+        m = s.match(/\d+(?:\.\d+)+/);
+        if (m) return 'v' + m[0];
+        return s.toLowerCase();
+    }
+
+    function setVersionChip(rawVersion) {
+        var label = extractVersionLabel(rawVersion);
+        if (!versionChip || !versionChipText || !label) return;
+        versionChipText.textContent = label;
+        versionChip.title = 'Version del software: ' + rawVersion;
+        versionChip.classList.add('loaded');
+        log('[Version] Chip actualizado: ' + label + ' (SW: ' + rawVersion + ')');
+    }
+
+    function hideVersionChip() {
+        if (versionChip) versionChip.classList.add('hidden');
+    }
+
+    function requestSwVersion() {
+        if (!versionChip) return;
+        if (!('serviceWorker' in navigator)) { hideVersionChip(); return; }
+
+        if (navigator.serviceWorker.controller) {
+            try {
+                var channel = new MessageChannel();
+                channel.port1.onmessage = function(event) {
+                    if (event.data && event.data.version) {
+                        setVersionChip(event.data.version);
+                    } else {
+                        hideVersionChip();
+                    }
+                };
+                navigator.serviceWorker.controller.postMessage(
+                    { type: 'GET_VERSION' },
+                    [channel.port2]
+                );
+            } catch (e) {
+                log('[Version] Error pidiendo version al SW: ' + e.message);
+                hideVersionChip();
+            }
+            return;
+        }
+
+        // Sin controlador aun (primer arranque): reintentar unos segundos
+        if (_versionRetries < 8) {
+            _versionRetries++;
+            setTimeout(requestSwVersion, 1200);
+        } else {
+            hideVersionChip();
+        }
+    }
+
+    if (document.readyState === 'complete') {
+        requestSwVersion();
+    } else {
+        window.addEventListener('load', requestSwVersion);
+    }
     // =============================================================
     //  2. ONLINE / OFFLINE DETECTION
     // =============================================================
