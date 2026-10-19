@@ -2,7 +2,7 @@
 //  SERVICE WORKER - LED Remoto PWA
 // =========================================================
 
-const CACHE_NAME = 'led-remoto-v2.6';
+const CACHE_NAME = 'led-remoto-v2.7';
 
 // Recursos que se cachean en la instalacion
 const PRECACHE_ASSETS = [
@@ -51,7 +51,10 @@ self.addEventListener('activate', function(event) {
         caches.keys().then(function(cacheNames) {
             return Promise.all(
                 cacheNames.filter(function(name) {
-                    return name !== CACHE_NAME;
+                    // Filtrar por prefijo propio: caches.keys() es global al
+                    // origen y sin este filtro se borraban las cachés del
+                    // portal y de las demás apps.
+                    return name.startsWith('led-remoto-') && name !== CACHE_NAME;
                 }).map(function(name) {
                     console.log('[SW] Borrando cache vieja:', name);
                     return caches.delete(name);
